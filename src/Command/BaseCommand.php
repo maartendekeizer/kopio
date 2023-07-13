@@ -21,7 +21,8 @@ use Symfony\Component\Mime\Email;
 use DateTime;
 use InvalidArgumentException;
 use App\Exception\UnknownSourceException;
-
+use App\Exception\UnknownTargetException;
+use App\Exception\ConnectionErrorException;
 
 use Symfony\Component\Finder\Finder;
 use Symfony\Component\Yaml\Yaml;
@@ -30,6 +31,11 @@ use League\Flysystem\FilesystemOperator;
 use League\Flysystem\StorageAttributes;
 use League\Flysystem\FilesystemException;
 
+use League\Flysystem\Local\LocalFilesystemAdapter;
+use League\Flysystem\Filesystem;
+use League\Flysystem\Adapter\Local;
+
+use Symfony\Component\Filesystem\Exception\IOExceptionInterface;
 
 #[AsCommand(
     name: 'Base',
@@ -41,47 +47,54 @@ abstract class BaseCommand extends Command
     protected $logger;
 //    protected $mailer;
 
-    protected $timeStart;
-    protected $timeEnd;
     protected $jobType;
 
     private FilesystemOperator $kopioStorage;
 
+    protected $profileStorage;
 
+    protected $workingDir;
+    protected $jobMonitor;
+    protected $yamlInput;
+    protected $io;
 
     public function __construct(LoggerInterface $logger, FilesystemOperator $kopioStorage)
     {
         parent::__construct();
 
         $this->logger= $logger;
-        $this->timeStart = $timeEnd = null;
         $this->jobType = null;   
-        
         $this->kopioStorage = $kopioStorage;
-
     }
 
     protected function configure(): void
     {
         $this
-            ->addArgument('profilesDirectory', InputArgument::REQUIRED, '')
+            ->addArgument('profileDirectory', InputArgument::REQUIRED, '')
         ;
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
+        $this->io = new SymfonyStyle($input, $output);
 
-        $profilesMap = $input->getArgument('profilesDirectory');
+        $profileDirectory = $input->getArgument('profileDirectory');
 
-        if ($profilesMap) {
-            $io->note(sprintf('You passed an argument: %s', $profilesMap));
+        if ($profileDirectory) {
+            $this->io->note(sprintf('You passed an argument: %s', $profileDirectory));
+        } else {
+            $this->yamlInput['name'] = 'profile directory';
+            $this->addMonitor('failed', 'No commandline argument' );              
+            $this->jobNotification('No commandline argument');              
+            throw new FileSystemException();
         }
+
+        $this->createProfileStorage($profileDirectory);    
+        $workingStorage = $this->createWorkingStorage($profileDirectory);   
 
         try 
         {
-            $listing = $this->kopioStorage->listContents('\\' . $profilesMap, FALSE);
-
+            $listing = $this->profileStorage->listContents('\\', FALSE);
             foreach ($listing as $item) {
                 $path = $item->path();
 
@@ -91,106 +104,221 @@ abstract class BaseCommand extends Command
                         {
                             $files[] = $path;
                         }
-                } elseif ($item instanceof \League\Flysystem\DirectoryAttributes) {
-                    // handle the directory
-                }
+                } 
             }
         } catch (FilesystemException $exception) {
-            // handle the error
+            $this->yamlInput['name'] = 'listing';
+            $this->addMonitor('failed', $exception->getMessage() );  
+            $this->jobNotification($exception->getMessage());              
+            throw new FileSystemException($exception->getMessage());
         }
 
-        $jobsCounter = 0;
-        $jobsFailed = [];
-        $jobsSuccess= [];
 
-        $this->timeStart = new DateTime();
         foreach ($files as $file) {
-            $jobsCounter ++;
-
             try 
             {
-                $parsedFile = Yaml::parse($this->kopioStorage->read($file));
+                $this->yamlInput = Yaml::parse($this->profileStorage->read($file));
             } catch (FilesystemException $exception) {
-                $io->error($exception->getMessage()); 
-                throw new UnknownSourceException();
+                $this->yamlInput['name'] = 'listing';
+                $this->addMonitor('failed', $exception->getMessage());  
+                $this->jobNotification($exception->getMessage());                  
+                throw new UnknownSourceException($exception->getMessage());
             }   
 
-            $io->note('Parsing: ' . $file);
-
+            $this->io->note('Parsing: ' . $file);
             $backupJob = null;
-
+            $targetStorage = $this->createTargetStorage();
+ 
             switch (TRUE)
             {
-                case isset($parsedFile['mariadb']):
-                    $io->note('Starting action for MySQL/MariaDB with profile: ' . $parsedFile['mariadb']['name']);
-                    $backupJob = new MySqlBackup($parsedFile['mariadb']['name'], 'Backup', $parsedFile['mariadb']['source'], $parsedFile['mariadb']['target']['filesystem'] . DIRECTORY_SEPARATOR . $parsedFile['mariadb']['name'], strval($parsedFile['mariadb']['retention']['simple']['days']));
+                case isset($this->yamlInput['source']['mariadb']):
+                    $this->addMonitor('mariadb', $this->yamlInput['source']['mariadb']['database']);  
+
+                    $keysToCheck = ['username', 'password', 'host', 'database'];
+                    $this->verifyConfig($keysToCheck, $this->yamlInput['source']['mariadb']);
+
+                    $backupJob = new MySqlBackup($this->yamlInput, $targetStorage, $this->workingDir, $workingStorage);
+
+                    $errorMessage = $backupJob->checkSource();
+                    if (!empty($errorMessage) )
+                    {
+                        $this->addMonitor('failed', $errorMessage);  
+                        $this->jobNotification($errorMessage);           
+                        throw new ConnectionErrorException($errorMessage);
+                    }
+
                     break;
                 default:
-                    $io->error('Unknown backup type'); 
-                    throw new InvalidArgumentException('Unknown backup type');
+                    $this->addMonitor('failed', 'Unknown source type' . $this->yamlInput['source'] );  
+                    $this->jobNotification('Unknown source type' . $this->yamlInput['source']);
+                    throw new UnknownSourceException('Unknown source type');
             }
 
-/*
-            if (isset($parsedFile['mariadb'])) 
-            {
-                $io->note('Starting action for MySQL/MariaDB with profile: ' . $parsedFile['mariadb']['name']);
-                $backupJob = new MySqlBackup($parsedFile['mariadb']['name'], 'Backup', $parsedFile['mariadb']['source'], $parsedFile['mariadb']['target']['filesystem'] . DIRECTORY_SEPARATOR . $parsedFile['mariadb']['name'], strval($parsedFile['mariadb']['retention']['simple']['days']));
+            $this->io->note('Starting action with profile: ' . $this->yamlInput['name']);
 
-            } else if (isset($parsedFile['postgresql'])) {
-                $io->note('Starting action for postreSql with profile: ' . $parsedFile['postgresql']['name']);
-                $backupJob = new PostgreSqlBackup($parsedFile['postgresql']['name'], 'Backup', $parsedFile['postgresql']['source'], $parsedFile['postgresql']['target']['filesystem'] . DIRECTORY_SEPARATOR . $parsedFile['postgresql']['name'], strval($parsedFile['postgresql']['retention']['simple']['days']));
-                $messageSender = $this->messageSenderFactory->createMessageSender($parsedFile['postgresql']['notifications'], $backupJob);
-            } else if (isset($parsedFile['local'])) {
-                $io->note('Starting action for local backup with profile: ' . $parsedFile['local']['name']);
-                $backupJob = new LocalBackup($parsedFile['local']['name'], 'Backup',$parsedFile['local']['source'], $parsedFile['local']['destination']['filesystem'] . DIRECTORY_SEPARATOR . $parsedFile['local']['name'], strval($parsedFile['local']['retention']['simple']['days']));
-                $messageSender = $this->messageSenderFactory->createMessageSender($parsedFile['local']['notifications'], $backupJob);
-            } else if (isset($parsedFile['scp'])) {
-                $io->note('Starting action for scp backup with profile: ' . $parsedFile['scp']['name']);
-                $backupJob = new SCPBackup($parsedFile['scp']['name'], 'Backup', $parsedFile['scp']['source'], $parsedFile['scp']['destination']['filesystem'] . DIRECTORY_SEPARATOR . $parsedFile['scp']['name'], strval($parsedFile['scp']['retention']['simple']['days']));
-                $messageSender = $this->messageSenderFactory->createMessageSender($parsedFile['scp']['notifications'], $backupJob);
-
-            } else {
-                $io->error('Unknown backup type'); 
-                throw new InvalidArgumentException('Unknown backup type');
+            $this->addMonitor('begin', new DateTime() );  
+            if (!$this->doExecute($backupJob, $this->io, $this->logger)) {
+                $this->addMonitor('failed', 'Unknown (doExecute)' . $this->yamlInput['source'] );  
+                $this->jobNotification('Unknown (doExecute)');
             }
-*/
-// marien            $this->jobType = $backupJob->getType();
+            $this->addMonitor('end', new DateTime() );  
 
-            if (!$this->doExecute($backupJob, $io, $this->logger)) {
-                $jobsFailed[] = $backupJob;
-            } else {
-                $jobsSuccess[] = $backupJob;
-            }
-
-            sleep($_ENV['SLEEPTIME']);
+            $this->io->note('Sleep');
+            sleep(intval($_ENV['SLEEPTIME']));
         }    
+
+        $status = $this->jobNotification();       
+        if ($status) {
+            return Command::SUCCESS;
+        }
+
+        return Command::FAILURE;
+    }
+
+    protected function outputMonitor2jobMonitor($outputMonitor): void
+    {
+        foreach ($outputMonitor as $key => $value){
+            $this->addMonitor($key, $value);
+        }
+    }    
+
+    protected function addMonitor($item, $message): void
+    {
+        $this->jobMonitor[$this->yamlInput['name']] [$item] = $message;  
+
+    }
+
+    protected function createProfileStorage($profileDirectory): void
+    {    
+        try
+        {
+            $adapter = new LocalFilesystemAdapter($profileDirectory);
+            $this->profileStorage = new Filesystem($adapter);
+        } catch (FilesystemException $exception) {
+            $this->jobMonitor['profiles directory']['status'] = 'failed';  
+            $this->jobMonitor['profiles directory']['exception'] = $exception->getMessage();  
+            $this->jobNotification($exception->getMessage());              
+            throw new FileSystemException();
+        } 
+    }
     
-        $this->timeEnd = new DateTime();
+    protected function createWorkingStorage($profileDirectory ): Filesystem
+    {
+        $this->workingDir = $profileDirectory . DIRECTORY_SEPARATOR . 'temp';
+        try
+        {
+            $adapter = new LocalFilesystemAdapter($this->workingDir);
+            $workingStorage = new Filesystem($adapter);
+        } catch (FilesystemException $exception) {
+            $this->jobMonitor['working directory']['status'] = 'failed';  
+            $this->jobMonitor['working directory']['exception'] = $exception->getMessage();  
+            $this->jobNotification($exception->getMessage());              
+            throw new FileSystemException();
+        } 
 
-        // reporting
-        foreach ($jobsSuccess as $job) {
-        //  $message .= PHP_EOL . $job->getName() . PHP_EOL; 
+        return $workingStorage;
+    }
+
+    protected function createTargetStorage(): Filesystem
+    {
+        try
+        {
+            switch (TRUE)
+            {
+                case isset($this->yamlInput['target']['filesystem']):
+                    $this->jobMonitor[$this->yamlInput['name']]['targetType'] = 'filesystem';  
+                    $this->jobMonitor[$this->yamlInput['name']]['target'] = $this->yamlInput['target']['filesystem'];  
+
+                    $adapter = new LocalFilesystemAdapter($this->yamlInput['target']['filesystem']);
+                    $keysToCheck = ['filesystem'];
+                    $this->verifyConfig($keysToCheck, $this->yamlInput['target']);
+                    $targetStorage = new Filesystem($adapter);
+// TODO add other destinations                        
+                    break;
+                default:
+                    $this->jobMonitor[$this->yamlInput['name']]['status'] = 'failed';  
+                    $this->jobMonitor[$this->yamlInput['name']]['exception'] = 'Unknown target filesystem';  
+                    $this->jobNotification('Unknown target filesystem');           
+                    throw new UnknownTargetException();
+            }  
+        } catch (FilesystemException $exception) {
+            $this->jobMonitor[$this->yamlInput['name']]['status'] = 'failed';  
+            $this->jobMonitor[$this->yamlInput['name']]['exception'] = $exception->getMessage();  
+            $this->jobNotification($exception->getMessage());  
+            throw new FileSystemException($exception->getMessage());
         }
 
-        if (!empty($jobsFailed)) {
-            $io->error('Failed to create ' . count($jobsFailed) . ' of ' . $jobsCounter .' backups:');
-            
-            $count = 1;
-            foreach ($jobsFailed as $job) {
-                $io->error($count . ' [' . $job->getType() . '] ' . $job->getName() . ' failed with exception: ' . $job->getException()->getMessage());
-                $count ++;
-            }
-        
-            return Command::FAILURE;
+        return $targetStorage;                      
+    }
+
+
+    public function verifyConfig($keysToCheck, $array): void 
+    {
+        foreach($keysToCheck as $key) 
+        {
+            if (!array_key_exists($key, $array)) {
+                $this->jobMonitor[$this->yamlInput['name']]['status'] = 'failed';  
+                $this->jobMonitor[$this->yamlInput['name']]['exception'] = 'No ' . $key . ' defined';  
+                $this->jobNotification('No ' . $key . ' defined');  
+                throw new InvalidArgumentException('No ' . $key . ' defined');
+            }    
         }
-        return Command::SUCCESS;
     } 
     
+    public function createWorkingDir($profilesDirectory): void 
+    {
+        $this->workingDir = $profilesDirectory . DIRECTORY_SEPARATOR . 'temp';
+
+        try {
+            $this->profileStorage->createDirectory('temp');            
+        } catch (FilesystemException $exception) {
+            $this->jobMonitor[$this->yamlInput['name']]['status'] = 'failed';  
+            $this->jobMonitor[$this->yamlInput['name']]['exception'] = $exception->getMessage();  
+            $this->jobNotification($exception->getMessage());  
+            throw new FilesystemException($exception);
+        }
+        return;
+    } 
+   
     protected abstract function doExecute(
             AbstractBackup $backupJob, 
             SymfonyStyle $io,
             LoggerInterface $logger
-        ): bool;
+            ): bool;
 
+    protected function jobNotification($errorMessage = NULL): bool 
+    {
+        $status = true;
+        if (!empty($errorMessage)) {
+            $this->io->error($errorMessage);
+            $this->logger->error($errorMessage);
+            $status = false;
+            print_r($this->jobMonitor); 
+        }
+        foreach ($this->jobMonitor as $job)
+        {
+            if (isset($job['status'] ) && $job['status'] == 'failed')
+            {
+                $status = false;
+            }
+        }
+
+
+    print_r($this->jobMonitor);        
+
+/* TODO
+     SEND MAIL
+
+             // reporting
+        $message = 'Successfully ended jobs: ';
+        foreach ($jobsSuccess as $job) 
+        {
+              $message .= PHP_EOL . $job . PHP_EOL; 
+        }
+        echo $message;
+*/  
+        return $status;
+
+    }        
     
 }

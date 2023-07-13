@@ -7,107 +7,99 @@ use App\Exception\CleanUpFailedException;
 use DateTime;
 use InvalidArgumentException;
 use Symfony\Component\Filesystem\Exception\IOException;
-use Symfony\Component\Filesystem\Filesystem;
-use Symfony\Component\Finder\Finder;
+
+
+use League\Flysystem\FilesystemOperator;
+use League\Flysystem\StorageAttributes;
+use League\Flysystem\FilesystemException;
+
+use League\Flysystem\Local\LocalFilesystemAdapter;
+use Symfony\Component\Process\Process;
+
+
+use League\Flysystem\Adapter\Local;
+use League\Flysystem\Filesystem;
+use League\Flysystem\MountManager;
+
 
 abstract class AbstractBackup
 {
-    protected $name;
-    protected $type;
-    protected $source;
-    protected $destination;
+    protected $targetStorage;
+    protected $workingDir;
+    protected $workingStorage;
+
     protected $keysToCheck;
-    protected $retention;
     protected $exception;
 
-    public function __construct(string $name, string $type, array $source, string $destination, string $retention)
+    protected $backupFile;
+    protected $yamlInput;
+    protected $outputMonitor;
+   
+
+    public function __construct(array $yamlInput, Filesystem $targetStorage, string $workingDir, Filesystem $workingStorage)
     {
-      
-        $this->name = $name;
-        $this->type = $type;
-        $this->source = $source;
-        $this->destination = rtrim($destination, "/");
-        $this->retention = $retention;
+        $this->yamlInput = $yamlInput;
+        $this->targetStorage = $targetStorage;
+        $this->workingDir = $workingDir;
+        $this->workingStorage = $workingStorage;
+
     }
 
-    public function prepareBackup(): void 
+    abstract public function checkSource(): string;
+    abstract public function executeBackup(): array;
+
+    public function moveFileToTarget(string $fromDir, string $file, bool $deleteFrom = false)
     {
-dd ($this->destination);        
-        $filesystem = new Filesystem();
-        $filesystem->mkdir($this->destination);
+
+        $mountManager = new MountManager([
+            'source' => $this->workingStorage,
+            'target' => $this->targetStorage,
+
+        ]);  
+        
+        $from = 'source://' . $file;
+        $to = 'target://' . $file;
+        if ($deleteFrom)
+        {
+            $mountManager->move($from, $to);
+        } else {
+            $mountManager->copy($from, $to);
+        }    
+
     }
 
-    public function verifyConfig(): void 
+    protected function addMonitor($item, $message): void
     {
-        foreach($this->keysToCheck as $key) {
-            if (!array_key_exists($key, $this->source)) {
-                throw new InvalidArgumentException('No ' . $key . ' defined');
-            }    
-        }
-    }
-
-    public function generateRandomString($length = 8) 
-    {
-        $characters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-        $charactersLength = strlen($characters);
-        $randomString = '';
-        for ($i = 0; $i < $length; $i++) {
-            $randomString .= $characters[rand(0, $charactersLength - 1)];
-        }
-        return $randomString;
-    }
-
-    public function getName() 
-    {
-        return $this->name;
-    }
-
-    public function getType() 
-    {
-        return $this->type;
-    }
-
-    public function setType($type) 
-    {
-        $this->type = $type;
-    }
-
-    public function getException() 
-    {
-        return $this->exception;
-    }
-
-    public function setException(\Exception $exception) 
-    {
-        $this->exception = $exception;
-    }
-
-    abstract public function checkSource(): void;
-
-    abstract public function executeBackup(): void;
+        $this->outputMonitor [$item] = $message;  
+    }    
 
     public function cleanUp()
     {
-        $finder = new Finder();
-        $files = $finder->in($this->destination)->files()->name('*');
-        
-        $filesystem = new Filesystem();
-        
-        foreach ($files as $file) {
-            $fileDate = $file->getFilenameWithoutExtension();
-            $fileDateObject = \DateTime::createFromFormat('YmdHis', $fileDate);
-
-            $currentDate = new DateTime('now');
+        dump ("TODO: cleanup");
+        /*
+            $finder = new Finder();
+            //        $files = $finder->in($this->destination)->files()->name('*');
+            $files = $finder->in('c:\temp\*.sql');
             
-            $interval = $fileDateObject->diff($currentDate);
+            $filesystem = new Filesystem();
+            
+            foreach ($files as $file) {
+                $fileDate = $file->getFilenameWithoutExtension();
+                $fileDateObject = \DateTime::createFromFormat('YmdHis', $fileDate);
 
-            if ($this->retention < $interval->days) {
-                try {
-                     $filesystem->remove($file->getRealPath());
-                } catch(IOException $e) {
-                    throw new CleanUpFailedException('Failed to create backup for file:' . $file->getRealPath());
+                $currentDate = new DateTime('now');
+                
+                $interval = $fileDateObject->diff($currentDate);
+
+                if ($this->retention < $interval->days) {
+                    try {
+                        $filesystem->remove($file->getRealPath());
+                    } catch(IOException $e) {
+                        throw new CleanUpFailedException('Failed to create backup for file:' . $file->getRealPath());
+                    }
                 }
             }
-        }
+        */          
     }
 }
+
