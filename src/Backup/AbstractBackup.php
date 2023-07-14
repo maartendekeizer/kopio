@@ -45,7 +45,6 @@ abstract class AbstractBackup
 
     }
 
-    abstract public function checkSource(): string;
     abstract public function executeBackup(): array;
 
     public function moveFileToTarget(string $fromDir, string $file, bool $deleteFrom = false)
@@ -65,7 +64,6 @@ abstract class AbstractBackup
         } else {
             $mountManager->copy($from, $to);
         }    
-
     }
 
     protected function addMonitor($item, $message): void

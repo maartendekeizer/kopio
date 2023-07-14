@@ -13,6 +13,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 
 use App\Backup\AbstractBackup;
 use App\Backup\MySqlBackup;
+use App\Backup\PostgresBackup;
+
 
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\MailerInterface;
@@ -83,7 +85,6 @@ abstract class BaseCommand extends Command
         if ($profileDirectory) {
             $this->io->note(sprintf('You passed an argument: %s', $profileDirectory));
         } else {
-            $this->yamlInput['name'] = 'profile directory';
             $this->addMonitor('failed', 'No commandline argument' );              
             $this->jobNotification('No commandline argument');              
             throw new FileSystemException();
@@ -107,47 +108,47 @@ abstract class BaseCommand extends Command
                 } 
             }
         } catch (FilesystemException $exception) {
-            $this->yamlInput['name'] = 'listing';
-            $this->addMonitor('failed', $exception->getMessage() );  
+            $this->addMonitor('failed', 'Profiles ' . $exception->getMessage() );  
             $this->jobNotification($exception->getMessage());              
             throw new FileSystemException($exception->getMessage());
         }
-
 
         foreach ($files as $file) {
             try 
             {
                 $this->yamlInput = Yaml::parse($this->profileStorage->read($file));
             } catch (FilesystemException $exception) {
-                $this->yamlInput['name'] = 'listing';
-                $this->addMonitor('failed', $exception->getMessage());  
+                $this->addMonitor('failed', 'Profile ' . $file . ' ' . $exception->getMessage());  
                 $this->jobNotification($exception->getMessage());                  
                 throw new UnknownSourceException($exception->getMessage());
             }   
 
             $this->io->note('Parsing: ' . $file);
+            $this->addMonitor('profile', $this->yamlInput['name']);  
+            $this->addMonitor('profileFile', $file);  
+
+            $this->addMonitor('notificationWhen', $this->yamlInput['notifications']['when']);  
+            $this->addMonitor('notificationEmailTo', $this->yamlInput['notifications']['email']);  
+            $this->addMonitor('notificationSubject', $this->yamlInput['notifications']['subject']);  
+
+
             $backupJob = null;
             $targetStorage = $this->createTargetStorage();
- 
+
             switch (TRUE)
             {
                 case isset($this->yamlInput['source']['mariadb']):
                     $this->addMonitor('mariadb', $this->yamlInput['source']['mariadb']['database']);  
-
                     $keysToCheck = ['username', 'password', 'host', 'database'];
                     $this->verifyConfig($keysToCheck, $this->yamlInput['source']['mariadb']);
-
                     $backupJob = new MySqlBackup($this->yamlInput, $targetStorage, $this->workingDir, $workingStorage);
-
-                    $errorMessage = $backupJob->checkSource();
-                    if (!empty($errorMessage) )
-                    {
-                        $this->addMonitor('failed', $errorMessage);  
-                        $this->jobNotification($errorMessage);           
-                        throw new ConnectionErrorException($errorMessage);
-                    }
-
                     break;
+                case isset($this->yamlInput['source']['postgres']):
+                    $this->addMonitor('mariadb', $this->yamlInput['source']['postgres']['database']);  
+                    $keysToCheck = ['username', 'password', 'host', 'database'];
+                    $this->verifyConfig($keysToCheck, $this->yamlInput['source']['postgres']);
+                    $backupJob = new PostgresBackup($this->yamlInput, $targetStorage, $this->workingDir, $workingStorage);
+                    break;                    
                 default:
                     $this->addMonitor('failed', 'Unknown source type' . $this->yamlInput['source'] );  
                     $this->jobNotification('Unknown source type' . $this->yamlInput['source']);
@@ -171,7 +172,7 @@ abstract class BaseCommand extends Command
         if ($status) {
             return Command::SUCCESS;
         }
-
+        $this->io->error('Job ended with errors');
         return Command::FAILURE;
     }
 
@@ -184,8 +185,10 @@ abstract class BaseCommand extends Command
 
     protected function addMonitor($item, $message): void
     {
+        if (!isset($this->yamlInput['name'])) {
+            $this->yamlInput['name'] = 'General';
+        }
         $this->jobMonitor[$this->yamlInput['name']] [$item] = $message;  
-
     }
 
     protected function createProfileStorage($profileDirectory): void
@@ -195,8 +198,7 @@ abstract class BaseCommand extends Command
             $adapter = new LocalFilesystemAdapter($profileDirectory);
             $this->profileStorage = new Filesystem($adapter);
         } catch (FilesystemException $exception) {
-            $this->jobMonitor['profiles directory']['status'] = 'failed';  
-            $this->jobMonitor['profiles directory']['exception'] = $exception->getMessage();  
+            $this->addMonitor('failed', 'Profiles directory: ' . $profileDirectory . ' ' . $exception->getMessage());  
             $this->jobNotification($exception->getMessage());              
             throw new FileSystemException();
         } 
@@ -205,13 +207,13 @@ abstract class BaseCommand extends Command
     protected function createWorkingStorage($profileDirectory ): Filesystem
     {
         $this->workingDir = $profileDirectory . DIRECTORY_SEPARATOR . 'temp';
+        $this->addMonitor('WorkingDirectory', $this->workingDir);
         try
         {
             $adapter = new LocalFilesystemAdapter($this->workingDir);
             $workingStorage = new Filesystem($adapter);
         } catch (FilesystemException $exception) {
-            $this->jobMonitor['working directory']['status'] = 'failed';  
-            $this->jobMonitor['working directory']['exception'] = $exception->getMessage();  
+            $this->addMonitor('failed', 'Profiles directory: ' . $this->workingDir . ' ' . $exception->getMessage());  
             $this->jobNotification($exception->getMessage());              
             throw new FileSystemException();
         } 
@@ -226,9 +228,8 @@ abstract class BaseCommand extends Command
             switch (TRUE)
             {
                 case isset($this->yamlInput['target']['filesystem']):
-                    $this->jobMonitor[$this->yamlInput['name']]['targetType'] = 'filesystem';  
-                    $this->jobMonitor[$this->yamlInput['name']]['target'] = $this->yamlInput['target']['filesystem'];  
-
+                    $this->addMonitor('targetType' , 'filesystem');  
+                    $this->addMonitor('target' , $this->yamlInput['target']['filesystem']);  
                     $adapter = new LocalFilesystemAdapter($this->yamlInput['target']['filesystem']);
                     $keysToCheck = ['filesystem'];
                     $this->verifyConfig($keysToCheck, $this->yamlInput['target']);
@@ -236,14 +237,12 @@ abstract class BaseCommand extends Command
 // TODO add other destinations                        
                     break;
                 default:
-                    $this->jobMonitor[$this->yamlInput['name']]['status'] = 'failed';  
-                    $this->jobMonitor[$this->yamlInput['name']]['exception'] = 'Unknown target filesystem';  
+                    $this->addMonitor('failed', 'Unknown target filesystem');  
                     $this->jobNotification('Unknown target filesystem');           
                     throw new UnknownTargetException();
             }  
         } catch (FilesystemException $exception) {
-            $this->jobMonitor[$this->yamlInput['name']]['status'] = 'failed';  
-            $this->jobMonitor[$this->yamlInput['name']]['exception'] = $exception->getMessage();  
+            $this->addMonitor('failed', $exception->getMessage());  
             $this->jobNotification($exception->getMessage());  
             throw new FileSystemException($exception->getMessage());
         }
@@ -251,35 +250,18 @@ abstract class BaseCommand extends Command
         return $targetStorage;                      
     }
 
-
     public function verifyConfig($keysToCheck, $array): void 
     {
         foreach($keysToCheck as $key) 
         {
             if (!array_key_exists($key, $array)) {
-                $this->jobMonitor[$this->yamlInput['name']]['status'] = 'failed';  
-                $this->jobMonitor[$this->yamlInput['name']]['exception'] = 'No ' . $key . ' defined';  
+                $this->addMonitor('failed', 'No ' . $key . ' defined');  
                 $this->jobNotification('No ' . $key . ' defined');  
                 throw new InvalidArgumentException('No ' . $key . ' defined');
             }    
         }
     } 
-    
-    public function createWorkingDir($profilesDirectory): void 
-    {
-        $this->workingDir = $profilesDirectory . DIRECTORY_SEPARATOR . 'temp';
-
-        try {
-            $this->profileStorage->createDirectory('temp');            
-        } catch (FilesystemException $exception) {
-            $this->jobMonitor[$this->yamlInput['name']]['status'] = 'failed';  
-            $this->jobMonitor[$this->yamlInput['name']]['exception'] = $exception->getMessage();  
-            $this->jobNotification($exception->getMessage());  
-            throw new FilesystemException($exception);
-        }
-        return;
-    } 
-   
+  
     protected abstract function doExecute(
             AbstractBackup $backupJob, 
             SymfonyStyle $io,
@@ -295,14 +277,15 @@ abstract class BaseCommand extends Command
             $status = false;
             print_r($this->jobMonitor); 
         }
+     
         foreach ($this->jobMonitor as $job)
         {
-            if (isset($job['status'] ) && $job['status'] == 'failed')
+            if (isset($job['failed'] ) )
             {
                 $status = false;
+                print_r($this->jobMonitor);
             }
         }
-
 
     print_r($this->jobMonitor);        
 

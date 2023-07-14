@@ -43,9 +43,9 @@ class BackupCommand extends BaseCommand
                 throw new BackupFailedException($outputMonitor['errorMessage']);
                 return false;                
             } else { 
-                $this->addMonitor('success',  'Succesfully created backup: ' .  $this->yamlInput['name']); 
-                $logger->info('Succesfully created backup: ', ['profileName' => $this->yamlInput['name']]);
-                $io->success('Succesfully created backup: ', ['profileName' =>  $this->yamlInput['name']]);
+                $this->addMonitor('success',  'Successfully created'); 
+                $logger->info('Successfully created ');
+                $io->success('Successfully created ');
                 return true;
             }
         } catch (\Exception $exception) {
