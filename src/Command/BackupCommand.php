@@ -4,15 +4,9 @@ declare(strict_types=1);
 namespace App\Command;
 
 use Symfony\Component\Console\Attribute\AsCommand;
-use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\InputArgument;
-use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Input\InputOption;
-use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 use App\Exception\BackupFailedException;
-
 use App\Backup\AbstractBackup;
 
 use Psr\Log\LoggerInterface;
@@ -34,23 +28,18 @@ class BackupCommand extends BaseCommand
     {
         try {
             $io->note('Creating the backup');
-            $outputMonitor = $backupJob->executeBackup();
-            $this->outputMonitor2jobMonitor($outputMonitor);
-   
-            if (isset($outputMonitor['errorMessage']) ) {
-                $this->addMonitor('failed',  $outputMonitor['errorMessage']); 
-                $this->jobNotification($outputMonitor['errorMessage']);              
-                throw new BackupFailedException($outputMonitor['errorMessage']);
-                return false;                
-            } else { 
-                $this->addMonitor('success',  'Successfully created'); 
-                $logger->info('Successfully created ');
-                $io->success('Successfully created ');
+            $backupStatus = $backupJob->executeBackup();
+            $this->addMonitor('backupMessage',  $backupStatus); 
+          
+            if (!$backupStatus || $backupStatus === 'success' ) {
+                $this->addMonitor('file_created',  'Backup file created'); 
                 return true;
-            }
+            } else {    
+                $this->addMonitor('failed',  $backupStatus, 'ERROR'); 
+                return false;                
+            }    
         } catch (\Exception $exception) {
-            $this->addMonitor('failed',  $exception->getMessage() );  
-            $this->jobNotification($exception->getMessage());              
+            $this->addMonitor('failed',  $exception->getMessage(), 'ERROR' );  
             return false;
         }
     } 

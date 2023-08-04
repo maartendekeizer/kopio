@@ -10,39 +10,31 @@ use Symfony\Component\Process\Exception\ProcessFailedException;
 use Symfony\Component\Process\Process;
 
 use League\Flysystem\Filesystem;
-use League\Flysystem\MountManager;
 
 class PostgresBackup extends AbstractBackup
 {
-    public function __construct(array $yamlInput, Filesystem $targetStorage, string $workingDir, Filesystem $workingStorage)
+    public function __construct(array $yamlInput, Filesystem $targetStorage, string $workingDir, Filesystem $workingStorage, string $backupFile)
     {
-        parent::__construct($yamlInput, $targetStorage, $workingDir, $workingStorage);
+        parent::__construct($yamlInput, $targetStorage, $workingDir, $workingStorage, $backupFile);
     }
 
-    public function executeBackup(): array
+    public function executeBackup(): string
     {
-        if (is_null($this->yamlInput['source']['postgres']['password']) )   // In develop password = null
+        $command = 'pg_dump -h ' . escapeshellarg($this->yamlInput['source']['postgres']['host']) .  ' -p '  . $this->yamlInput['source']['postgres']['port'] .  ' -U ' . escapeshellarg($this->yamlInput['source']['postgres']['username']) . ' -d ' .  escapeshellarg($this->yamlInput['source']['postgres']['database']) . ' -F p >' .  $this->workingDir . DIRECTORY_SEPARATOR . $this->backupFile ;
+        if (is_null($this->yamlInput['source']['postgres']['password']) )   // NULL -> prompt, or pgpass (windows) 
         {
             $pwEscaped = NULL;
-        } else{
+        } else {
             $pwEscaped = escapeshellarg($this->yamlInput['source']['postgres']['password']);          
+            $command = 'PGPASSWORD=' . $pwEscaped .  'pg_dump -h ' . escapeshellarg($this->yamlInput['source']['postgres']['host']) .  ' -p '  . $this->yamlInput['source']['postgres']['port'] .  ' -U ' . escapeshellarg($this->yamlInput['source']['postgres']['username']) . ' -d ' .  escapeshellarg($this->yamlInput['source']['postgres']['database']) . ' -F p >' .  $this->workingDir . DIRECTORY_SEPARATOR . $this->backupFile ;
         }
-        $datumTijd = new DateTime();
-        $this->backupFile = 'KOPIO_' . $this->yamlInput['source']['postgres']['database'] . '_' . $datumTijd->format('YmdHis') . '.sql';
-        $this->addMonitor('backupFile', $this->backupFile);      
-// TODO PGPASSWORD (Unix)  pgpass 
-        $command = 'pg_dump -h ' . escapeshellarg($this->yamlInput['source']['postgres']['host']) .  ' -p '  . $this->yamlInput['source']['postgres']['port'] .  ' -U ' . escapeshellarg($this->yamlInput['source']['postgres']['username']) . ' -d ' .  escapeshellarg($this->yamlInput['source']['postgres']['database']) . ' -F p >' .  $this->workingDir . DIRECTORY_SEPARATOR . $this->backupFile ;
-
-        // todo     pg_dump -U username -W -F t database_name > c:\backup_file.tar
+   
         $process = Process::fromShellCommandline($command);
         $process->mustRun();
         if (!$process->isSuccessful()) {
-            $this->addMonitor('failed', 'Failed to create Postgres backup for database: ' . $this->yamlInput['source']['postgres']['database'] . ' on host: ' . $this->yamlInput['source']['postgres']['host'] . ' with error output ' . $process->getErrorOutput() );  
-            return $this->outputMonitor;
+            return 'Command Failed';
         }
 
-        $this->moveFileToTarget($this->workingDir, $this->backupFile, true);
-
-        return $this->outputMonitor;
+        return 'success';
     }
 }

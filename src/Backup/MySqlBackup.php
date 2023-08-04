@@ -3,23 +3,20 @@
 declare(strict_types=1);
 namespace App\Backup;
 
-use App\Exception\ConnectionErrorException;
-
 use DateTime;
-use Symfony\Component\Process\Exception\ProcessFailedException;
 use Symfony\Component\Process\Process;
 
 use League\Flysystem\Filesystem;
-use League\Flysystem\MountManager;
+
 
 class MySqlBackup extends AbstractBackup
 {
-    public function __construct(array $yamlInput, Filesystem $targetStorage, string $workingDir, Filesystem $workingStorage)
+    public function __construct(array $yamlInput, Filesystem $targetStorage, string $workingDir, Filesystem $workingStorage, string $backupFile)
     {
-        parent::__construct($yamlInput, $targetStorage, $workingDir, $workingStorage);
+        parent::__construct($yamlInput, $targetStorage, $workingDir, $workingStorage, $backupFile);
     }
 
-    public function executeBackup(): array
+    public function executeBackup(): string
     {
         if (is_null($this->yamlInput['source']['mariadb']['password']) )   // In develop password = null
         {
@@ -27,21 +24,15 @@ class MySqlBackup extends AbstractBackup
         } else{
             $pwEscaped = escapeshellarg($this->yamlInput['source']['mariadb']['password']);          
         }
-        $datumTijd = new DateTime();
-        $this->backupFile = 'KOPIO_' . $this->yamlInput['source']['mariadb']['database'] . '_' . $datumTijd->format('YmdHis') . '.sql';
-        $this->addMonitor('backupFile', $this->backupFile);      
-
-//TODO:  --routines   --single-transaction (InnoDB)   --quick (InnoDB)
+     
         $command = 'mysqldump --user=' . escapeshellarg($this->yamlInput['source']['mariadb']['username']) . " --password=" . $pwEscaped . " --host=" . escapeshellarg($this->yamlInput['source']['mariadb']['host']) . " --port=" . $this->yamlInput['source']['mariadb']['port'] . " " . escapeshellarg($this->yamlInput['source']['mariadb']['database']) . ' > ' .  $this->workingDir . DIRECTORY_SEPARATOR . $this->backupFile ;
+
         $process = Process::fromShellCommandline($command);
         $process->mustRun();
         if (!$process->isSuccessful()) {
-            $this->addMonitor('failed', 'Failed to create MySql backup for database: ' . $this->yamlInput['source']['mariadb']['database'] . ' on host: ' . $this->yamlInput['source']['mariadb']['host'] . ' with error output ' . $process->getErrorOutput() );  
-            return $this->outputMonitor;
+            return 'Command Failed';
         }
 
-        $this->moveFileToTarget($this->workingDir, $this->backupFile, true);
-
-        return $this->outputMonitor;
+        return 'success';
     }
 }
