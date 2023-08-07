@@ -90,6 +90,7 @@ class SFTPBackup extends AbstractBackup
             }
             $removePrefix = ' -C ' . $this->workingDir . DIRECTORY_SEPARATOR . $dirToCompress . DIRECTORY_SEPARATOR . '. ';
             $command = 'tar ' . $removePrefix .  ' -cvzf '. $this->workingDir . DIRECTORY_SEPARATOR . $this->backupFile . ' ' . escapeshellarg($this->workingDir . DIRECTORY_SEPARATOR . $dirToCompress ) ;
+
             $process = Process::fromShellCommandline($command);
             $process->mustRun();
             $this->workingStorage->deleteDirectory($dirToCompress);

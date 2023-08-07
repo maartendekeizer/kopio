@@ -44,6 +44,9 @@ use League\Flysystem\AwsS3V3\AwsS3V3Adapter;
 use League\Flysystem\AwsS3V3\PortableVisibilityConverter as AwsPortableVisibilityConverter;
 use League\Flysystem\FilesystemAdapter;
 use League\Flysystem\Visibility;
+use League\Flysystem\AzureBlobStorage\AzureBlobStorageAdapter;
+use MicrosoftAzure\Storage\Blob\BlobRestProxy;
+
 
 use League\Flysystem\Filesystem;
 use League\Flysystem\MountManager;
@@ -429,11 +432,11 @@ abstract class BaseCommand extends Command
                     $this->verifyConfig($keysToCheck, $this->yamlInput['target']['sftp']);
                     $targetStorage = new Filesystem($adapter);
                     break;   
-/*                    
+                    
                 case isset($this->yamlInput['target']['awss3']):
                     $this->addMonitor('targetType' , 'awss3');  
-                    $this->addMonitor('target' , $this->yamlInput['target']['awss3']['host']);  
-
+                    $keysToCheck = ['region', 'version', 'endpoint', 'access-key', 'secret', 'bucket'];
+                    $this->verifyConfig($keysToCheck, $this->yamlInput['target']['awss3']);
                     $client = new S3Client([
                         'region' =>   $this->yamlInput['target']['awss3']['region'], 
                         'version' =>  $this->yamlInput['target']['awss3']['version'],
@@ -444,18 +447,41 @@ abstract class BaseCommand extends Command
                         ],
                         'use_path_style_endpoint' => $this->yamlInput['target']['awss3']['use_path_style_endpoint'], 
                     ]);
-                    $adapter = new AwsS3V3Adapter(
-                        $client, 
-                        $this->yamlInput['target']['awss3']['bucket'],  
-                        $this->yamlInput['target']['awss3']['prefix'] 
-                    );
+                    if (!  $this->yamlInput['target']['awss3']['prefix'] ) { 
+                        $adapter = new AwsS3V3Adapter(
+                            $client, 
+                            $this->yamlInput['target']['awss3']['bucket'],  
+                        );
+                    } else {    
+                        $adapter = new AwsS3V3Adapter(
+                            $client, 
+                            $this->yamlInput['target']['awss3']['bucket'],  
+                            $this->yamlInput['target']['awss3']['prefix'] 
+                        ); 
+                    }    
 
-
-                    $keysToCheck = ['host', 'username', 'path'];
-                    $this->verifyConfig($keysToCheck, $this->yamlInput['target']['sftp']);
                     $targetStorage = new Filesystem($adapter);
-                    break;                 
-*/                   
+                    break;    
+                case isset($this->yamlInput['target']['azureblob']):
+                    $this->addMonitor('targetType' , 'azureblob');  
+                    $keysToCheck = ['dsn', 'container'];
+                    $this->verifyConfig($keysToCheck, $this->yamlInput['target']['azureblob']);
+
+                    $client = BlobRestProxy::createBlobService($this->yamlInput['target']['azureblob']['dsn'] );
+                    if (!$this->yamlInput['target']['azureblob']['prefix']) {
+                        $adapter = new AzureBlobStorageAdapter(
+                            $client,
+                            $this->yamlInput['target']['azureblob']['container'] ,
+                        );
+                    } else {    
+                        $adapter = new AzureBlobStorageAdapter(
+                            $client,
+                            $this->yamlInput['target']['azureblob']['container'] ,
+                            $this->yamlInput['target']['azureblob']['prefix'],
+                        );
+                    }    
+                    $targetStorage = new Filesystem($adapter);
+                    break;           
                     
                 default:
                     $this->addMonitor('failed', 'Unknown target filesystem', 'ERROR');  
@@ -490,7 +516,7 @@ abstract class BaseCommand extends Command
     {
         $sendReport = false;    
         $subject = $this->profileMonitor['notificationSubject'];   
-        if ( !isset($monitor['failed'] )  ) {
+        if ( !isset($this->profileMonitor['failed'] )  ) {
             $subject .= ' Successfull: ';
             $this->jobs[$this->profileMonitor['profile'] . '/' . $this->profileMonitor['profileFile'] ] = 'successfull';
             if ($this->profileMonitor['notificationWhen'] === 'always') {
