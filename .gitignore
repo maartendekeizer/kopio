@@ -7,7 +7,4 @@
 /public/bundles/
 /var/
 /vendor/
-profiles/
 ###< symfony/framework-bundle ###
-
-sql-backups/

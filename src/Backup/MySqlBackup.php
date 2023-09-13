@@ -3,35 +3,36 @@
 declare(strict_types=1);
 namespace App\Backup;
 
-use App\Exception\ConnectionErrorException;
-use App\Exception\BackupFailedException;
+use DateTime;
+use Symfony\Component\Process\Process;
+
+use League\Flysystem\Filesystem;
+
 
 class MySqlBackup extends AbstractBackup
 {
-    public function __construct(string $name, string $type, array $source, string $destination, string $retention)
+    public function __construct(array $yamlInput, Filesystem $targetStorage, string $workingDir, Filesystem $workingStorage, string $backupFile)
     {
-        parent::__construct($name, $type, $source, $destination, $retention);
-        $this->keysToCheck = ['host', 'port', 'username', 'password', 'database'];
+        parent::__construct($yamlInput, $targetStorage, $workingDir, $workingStorage, $backupFile);
     }
 
-    public function checkSource(): void
+    public function executeBackup(): string
     {
-        try {
-            $conn = new \PDO("mysql:host=" . $this->source['host'] . ";port=" . $this->source['port'] . ";dbname=".$this->source['database'], $this->source['username'], $this->source['password']);
-        } catch(\PDOException $e) {
-
-            throw new ConnectionErrorException($e->getMessage());
+        if (is_null($this->yamlInput['source']['mariadb']['password']) )   // In develop password = null
+        {
+            $pwEscaped = NULL;
+        } else{
+            $pwEscaped = escapeshellarg($this->yamlInput['source']['mariadb']['password']);          
         }
-    }
+     
+        $command = 'mysqldump --user=' . escapeshellarg($this->yamlInput['source']['mariadb']['username']) . " --password=" . $pwEscaped . " --host=" . escapeshellarg($this->yamlInput['source']['mariadb']['host']) . " --port=" . $this->yamlInput['source']['mariadb']['port'] . " " . escapeshellarg($this->yamlInput['source']['mariadb']['database']) . ' > ' .  $this->workingDir . DIRECTORY_SEPARATOR . $this->backupFile ;
 
-    public function executeBackup(): void
-    {
-        $command = "mysqldump --user=" . $this->source['username'] . " --password=" . $this->source['password'] . " --host=" . $this->source['host'] . " --port=" . $this->source['port'] . " " . $this->source['database'] . " > " . $this->destination . DIRECTORY_SEPARATOR .  date("YmdHis") . '.sql';
-            
-        system($command, $return);
-
-        if ($return != 0) {
-            throw new BackupFailedException('Failed to create MySql backup for database: ' . $this->source['database'] . ' on host: ' . $this->source['host'] . ' with return code ' . $return);
+        $process = Process::fromShellCommandline($command);
+        $process->mustRun();
+        if (!$process->isSuccessful()) {
+            return 'Command Failed';
         }
+
+        return 'success';
     }
 }
