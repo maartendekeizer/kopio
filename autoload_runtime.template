@@ -8,8 +8,20 @@ if (true === (require_once __DIR__.'/autoload.php') || null === $scriptFileName 
     return;
 }
 
-$pharPath = Phar::running();
+////// fix for missing Phar class
+$pharPath = '';
+if (class_exists('Phar', false)) {
+    $pharPath = Phar::running();
+} else {
+    echo 'Phar class not found, declared classes:' . PHP_EOL;
+    print_r(get_declared_classes());
+}
+////// end
+
+////// dump info about paths
 var_dump($pharPath, $scriptFileName);
+////// end
+
 if (strlen($pharPath) > 0 && !str_starts_with($scriptFileName, 'phar://')) {
     $scriptFileName = $pharPath.DIRECTORY_SEPARATOR.$scriptFileName;
 }
