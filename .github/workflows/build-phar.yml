@@ -24,11 +24,14 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-php-
 
+    - name: Download composer
+      run: wget https://github.com/composer/composer/releases/download/2.6.5/composer.phar
+
     - name: Install dependencies
-      run: composer install --prefer-dist --no-progress
+      run: php composer.phar install --prefer-dist --no-progress
 
     - name: Dump env
-      run: composer dump-env prod
+      run: php composer.phar dump-env prod
 
     - name: Cache warmup
       run: php new-bin/console cache:warmup
@@ -36,14 +39,5 @@ jobs:
     - name: Download Box
       run: wget https://github.com/box-project/box/releases/download/4.3.8/box.phar
 
-    - name: Dump PHP version
-      run: php -v
-
-    - name: Dump PHP extensions
-      run: php -m
-
-    - name: Dump PHP config
-      run: php -i
-
     - name: Run Box
-      run: php box.phar compile
+      run: php box.phar compile --composer-bin=composer.phar
