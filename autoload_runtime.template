@@ -15,6 +15,10 @@ if (class_exists('Phar', false)) {
 } else {
     echo 'Phar class not found, declared classes:' . PHP_EOL;
     print_r(get_declared_classes());
+    echo 'PHP version:' . PHP_EOL;
+    print_r(phpversion());
+    echo 'Loaded extension:' . PHP_EOL;
+    print_r(get_loaded_extensions());
 }
 ////// end
 
