@@ -27,6 +27,9 @@ jobs:
     - name: Download composer
       run: wget https://github.com/composer/composer/releases/download/2.6.5/composer.phar
 
+    - name: Make composer executable
+      run: chmod ugo+x composer.phar
+
     - name: Install dependencies
       run: php composer.phar install --prefer-dist --no-progress
 
