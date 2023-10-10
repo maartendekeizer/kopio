@@ -27,6 +27,9 @@ jobs:
     - name: Install dependencies
       run: composer install --prefer-dist --no-progress
 
+    - name: Dump env
+      run: composer dump-env prod
+
     - name: Cache warmup
       run: php new-bin/console cache:warmup
 
