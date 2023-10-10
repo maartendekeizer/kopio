@@ -36,14 +36,14 @@ jobs:
     - name: Download Box
       run: wget https://github.com/box-project/box/releases/download/4.2.0/box.phar
 
-    - name: Autoload dump via composer
-      run: composer dump-autoload --classmap-authoritative --no-dev
-
     - name: Autoload dump via /usr/bin/composer
       run: /usr/bin/composer dump-autoload --classmap-authoritative --no-dev
 
-    - name: Where is composer
-      run: which composer
-
     - name: Run Box
       run: php box.phar compile
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: kopio.phar
+        path: build/kopio.phar
