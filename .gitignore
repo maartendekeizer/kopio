@@ -12,3 +12,7 @@
 # Test working data
 /test-data
 /test-logs
+
+# Phar build
+box-*.phar
+build/*
