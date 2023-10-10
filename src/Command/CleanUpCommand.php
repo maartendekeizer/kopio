@@ -6,7 +6,7 @@ namespace App\Command;
 
 use App\Helper\Logger;
 use App\Profile\AbstractNotification;
-use App\Source\SourceInterface;
+use App\Retention\RetentionInterface;
 use App\Target\TargetInterface;
 use DateTime;
 use ReflectionClass;
@@ -18,19 +18,18 @@ use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\String\Slugger\AsciiSlugger;
 use Symfony\Component\Yaml\Yaml;
 
-#[AsCommand('app:backup', 'Create a backup')]
-class BackupCommand extends BaseCommand
+#[AsCommand('app:cleanup', 'Clean up old backups')]
+class CleanUpCommand extends BaseCommand
 {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
+        $slugger = new AsciiSlugger('en');
         $commandStart = new DateTime();
         $allSuccessfull = true;
 
         $paths = $this->getBackupProfilesFromPath($input->getArgument('path'));
 
         $baseLogger = new Logger($output, $this->logger, []);
-
-        $fs = new Filesystem();
 
         foreach ($paths as $path) {
             $baseLogger->info('Found profile file', ['path' => $path]);
@@ -55,51 +54,40 @@ class BackupCommand extends BaseCommand
                 }
 
                 try {
-                    $profileLogger->debug('Prepare tmp location', ['tmp' => $profile->tmp->path]);
-                    $fs->mkdir($profile->tmp->path, $profile->tmp->mode);
-                    $profileLogger->debug('Tmp location prepared', []);
-
-                    $executor = $this->createExecutor($profileLogger, $profile->source, 'source', SourceInterface::class, [
-                        $profile->source,
+                    $targetExecutor = $this->createExecutor($profileLogger, $profile->target, 'target', TargetInterface::class, [
+                        $profile->target,
                         $profile->tmp->path,
                         $runId
                     ]);
-
-                    $profileLogger->info('Source component execution', []);
-                    $metaData['sourceExecutorStart'] = date('c');
-                    $tmpFiles = $executor->execute($profileLogger);
-                    $metaData['files'] = array_values($tmpFiles);
-                    $metaData['sourceExecutorEnd'] = date('c');
-                    $metaData['sourceExecutorDuration'] = strtotime($metaData['sourceExecutorEnd']) - strtotime($metaData['sourceExecutorStart']);
-                    $profileLogger->info('Source component finished', []);
-                    $profileLogger->debug('Files writen in tmp', ['tmpFiles' => $tmpFiles]);
-
-                    // calculate the size of the backup
-                    $size = 0.0;
-                    foreach (array_keys($tmpFiles) as $tmpFileName) {
-                        $size += (float) filesize($profile->tmp->path . DIRECTORY_SEPARATOR . $tmpFileName);
-                    }
-                    $metaData['size'] = $size;
-
-                    $executor = $this->createExecutor($profileLogger, $profile->target, 'target', TargetInterface::class, [
-                        $profile->target,
-                        $runId
-                    ]);
+                    assert($targetExecutor instanceof TargetInterface);
+                    $profileLogger->debug('Target component created successfully', []);
 
                     $profileLogger->info('Target component execution', []);
                     $metaData['targetExecutorStart'] = date('c');
-                    $executor->copy($profileLogger, $profile->tmp->path, $tmpFiles);
+                    $listOfBackups = $targetExecutor->list($profileLogger);
                     $metaData['targetExecutorEnd'] = date('c');
                     $metaData['targetExecutorDuration'] = strtotime($metaData['targetExecutorEnd']) - strtotime($metaData['targetExecutorStart']);
-                    $executor->writeMetaData($profileLogger, Yaml::dump($metaData));
-                    $profileLogger->info('Target component finished', []);
+                    $profileLogger->info('Target component finished', ['backups' => array_keys($listOfBackups)]);
+
+                    $retentionExecutor = $this->createExecutor($profileLogger, $profile->retention, 'retention', RetentionInterface::class, [
+                        $profile->retention,
+                        $runId
+                    ]);
+
+                    $profileLogger->info('Retention component execution', []);
+                    $backupsToRemove = $retentionExecutor->nominate($listOfBackups);
+                    $profileLogger->info('Retention component finished', ['toRemove' => $backupsToRemove]);
+
+                    $profileLogger->info('Target component remove execution', []);
+                    $targetExecutor->remove($profileLogger, $backupsToRemove);
+                    $profileLogger->info('Target component remove finisihed', []);
 
                     $profileLogger->info('Profile succeed, start sending notifications', []);
                     $this->sendNotifications($profileLogger, $profile, $runId, AbstractNotification::ON_SUCCESS, $metaData);
                     $profileLogger->info('Notifications send', []);
                 } catch (\Exception $e) {
                     $profileLogger->info('Profile failed, start sending notifications', []);
-                    $this->sendNotifications($baseLogger, $profile, $runId, AbstractNotification::ON_FAILURE, [
+                    $this->sendNotifications($profileLogger, $profile, $runId, AbstractNotification::ON_FAILURE, [
                         'e' => get_class($e),
                         'msg' => $e->getMessage(),
                         'file' => $e->getFile() . ':' . $e->getLine(),
@@ -116,5 +104,4 @@ class BackupCommand extends BaseCommand
 
         return $allSuccessfull ? self::SUCCESS : self::FAILURE;
     }
-
 }

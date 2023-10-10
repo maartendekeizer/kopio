@@ -22,10 +22,9 @@
         "symfony/monolog-bundle": "^3.8",
         "symfony/process": "6.2.*",
         "symfony/runtime": "6.2.*",
+        "symfony/string": "6.2.*",
+        "symfony/translation-contracts": "^3.3",
         "symfony/yaml": "6.2.*"
-    },
-    "require-dev": {
-        "symfony/maker-bundle": "^1.48"
     },
     "config": {
         "allow-plugins": {
@@ -56,13 +55,15 @@
     },
     "scripts": {
         "auto-scripts": {
-            "cache:clear": "symfony-cmd",
-            "assets:install %PUBLIC_DIR%": "symfony-cmd"
+            "cache:clear": "symfony-cmd"
         },
         "post-install-cmd": [
             "@auto-scripts"
         ],
         "post-update-cmd": [
+            "@auto-scripts"
+        ],
+        "post-autoload-dump": [
             "@auto-scripts"
         ]
     },
@@ -70,9 +71,13 @@
         "symfony/symfony": "*"
     },
     "extra": {
+        "bin-dir": "new-bin",
         "symfony": {
             "allow-contrib": false,
             "require": "6.2.*"
+        },
+        "runtime": {
+            "autoload_template": "autoload_runtime.template"
         }
     }
 }

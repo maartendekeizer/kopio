@@ -1,0 +1,16 @@
+{
+    "main": "new-bin/console",
+    "files-bin": [
+        ".env",
+        ".env.local.php",
+        "autoload_runtime.template"
+    ],
+    "directories": [
+        "config",
+        "var"
+    ],
+    "force-autodiscovery": true,
+    "check-requirements": false,
+    "exclude-composer-files": false,
+    "output": "build/kopio.phar"
+}
