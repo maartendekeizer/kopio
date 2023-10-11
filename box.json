@@ -12,6 +12,6 @@
     "force-autodiscovery": true,
     "check-requirements": false,
     "exclude-composer-files": false,
-    "dump-autoload": false,
+    "dump-autoload": true,
     "output": "build/kopio.phar"
 }
