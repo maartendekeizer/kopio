@@ -13,6 +13,7 @@ echo 'Loaded INI file: ' . php_ini_loaded_file() . PHP_EOL;
 echo 'Scanned INI files: ' . php_ini_scanned_files() . PHP_EOL;
 echo 'ENV dump: ' . PHP_EOL;
 print_r($_ENV);
+print_r(getenv());
 $pharPath = '';
 if (class_exists('Phar', false)) {
     $pharPath = Phar::running();
