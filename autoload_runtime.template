@@ -9,6 +9,8 @@ if (true === (require_once __DIR__.'/autoload.php') || null === $scriptFileName 
 }
 
 ////// fix for missing Phar class
+echo 'Loaded INI file: ' . php_ini_loaded_file() . PHP_EOL
+echo 'Scanned INI files: ' . php_ini_scanned_files() . PHP_EOL
 $pharPath = '';
 if (class_exists('Phar', false)) {
     $pharPath = Phar::running();
