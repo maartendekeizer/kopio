@@ -24,25 +24,39 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-php-
 
+    - name: Download Box
+      run: wget https://github.com/box-project/box/releases/download/4.4.0/box.phar
+
+    - name: Set phar.readonly=0
+      run: echo "phar.readonly=0" > /etc/php/8.1/cli/conf.d/99-phar.ini
+
+    ### Debug
+
+    - name: "Debug: show system env vars"
+      run: export
+
+    - name: Run phpinfo
+      run: php -i
+
+    ### Prepare for boxing
+
     - name: Install dependencies
       run: composer install --prefer-dist --no-progress
 
-    - name: Dump env
+    - name: Dump system envs to PHP via composer
       run: composer dump-env prod
-
-    - name: Dump ENV
-      run: export
 
     - name: Cache warmup
       run: php new-bin/console cache:warmup
 
-    - name: Download Box
-      run: wget https://github.com/box-project/box/releases/download/4.4.0/box.phar
+    ### Box it
 
     - name: Run Box
       env:
         BOX_ALLOW_XDEBUG: '1'
       run: php box.phar compile -v
+
+    ### Post boxing actions
 
     - name: Upload artifact
       uses: actions/upload-artifact@v3
