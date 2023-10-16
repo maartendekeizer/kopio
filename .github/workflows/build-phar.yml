@@ -30,6 +30,9 @@ jobs:
     - name: Dump env
       run: composer dump-env prod
 
+    - name: Dump ENV
+      run: export
+
     - name: Cache warmup
       run: php new-bin/console cache:warmup
 
