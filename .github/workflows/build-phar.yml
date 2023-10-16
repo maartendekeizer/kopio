@@ -40,6 +40,8 @@ jobs:
       run: wget https://github.com/box-project/box/releases/download/4.4.0/box.phar
 
     - name: Run Box
+      env:
+        BOX_ALLOW_XDEBUG: '1'
       run: php box.phar compile -v
 
     - name: Upload artifact
