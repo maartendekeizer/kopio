@@ -30,6 +30,8 @@ jobs:
       run: composer install --prefer-dist --no-progress
     - name: Dump envs via composer
       run: composer dump-env prod
+    - name: Remove dev cache
+      run: rm -Rf var/cache/dev
     - name: Cache warmup
       run: php new-bin/console cache:warmup
     - name: Run Box
