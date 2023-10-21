@@ -10,6 +10,13 @@ if (true === (require_once __DIR__.'/autoload.php') || empty($_SERVER['SCRIPT_FI
 
 $pharPath = Phar::running();
 
+echo 'Print paths as debug:' . PHP_EOL;
+print_r([
+  'pharPath' => $pharPath,
+  'scriptFileName' => $_SERVER['SCRIPT_FILENAME'],
+  'appScriptFileName' => $_SERVER['APP_SCRIPT_FILENAME']
+]);
+
 if (strlen($pharPath) == 0) {
     $scriptFileName = $_SERVER['SCRIPT_FILENAME'];
 } else {
