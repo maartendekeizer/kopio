@@ -1,4 +1,4 @@
-name: Build PHAR
+name: Build PHAR and publish
 
 on:
   push:
