@@ -51,7 +51,7 @@ jobs:
       - name: Download artifact from build step
         uses: actions/download-artifact@v3
         with:
-          name: box.phar
+          name: kopio.phar
           path: .
       - name: Release
         uses: softprops/action-gh-release@v1
