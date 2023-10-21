@@ -3,6 +3,8 @@ name: Build PHAR and publish
 on:
   push:
     branches: [ "main" ]
+  release:
+    types: [ created ]
 
 permissions:
   contents: write
